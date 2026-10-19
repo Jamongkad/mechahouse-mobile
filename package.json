@@ -29,7 +29,7 @@
     "lint": "expo lint",
     "format:check": "prettier --check .",
     "format": "prettier --write .",
-    "test": "jest --runInBand"
+    "test": "jest --runInBand --watchman=false"
   },
   "jest": {
     "preset": "jest-expo"

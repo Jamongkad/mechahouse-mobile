@@ -1,0 +1,7 @@
+{
+  "id": "pump-started",
+  "lines": [
+    "The aging pump groans to life.",
+    "Water pressure climbs to {waterPump.pressure} PSI."
+  ]
+}
