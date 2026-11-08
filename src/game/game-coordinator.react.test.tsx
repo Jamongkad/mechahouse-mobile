@@ -5,6 +5,7 @@ import {
   SimulationEngine,
   type SimulationModule,
 } from "../simulation/simulation";
+import type { SystemObservableProjections } from "../narration/observable-facts";
 import { useGameSnapshot } from "./use-game-snapshot";
 import { GameCoordinator } from "./game-coordinator";
 
@@ -37,13 +38,16 @@ function makeCoordinator() {
       },
     ],
   };
-  const narrationModule: NarrationModule<GameState> = {
+  const narrationModule: NarrationModule = {
     id: "engine",
-    rules: [
+    actionRules: [
       {
         id: "temperature.updated",
         evaluate(context) {
-          return context.outcomes.some(({ id }) => id === "temperature.updated")
+          return context.changes.some(
+            ({ factId, next }) =>
+              factId === "temperature.value" && next?.value === 120,
+          )
             ? { id: "temperature.updated" }
             : undefined;
         },
@@ -53,7 +57,7 @@ function makeCoordinator() {
   const narrationEngine = new NarrationEngine(narrationModule, [
     {
       id: "temperature.updated",
-      lines: ["Temperature is now {temperature.value} degrees."],
+      lines: ["Temperature is now {temperature.value}."],
     },
   ]);
 
@@ -61,6 +65,16 @@ function makeCoordinator() {
     initialState,
     new SimulationEngine([simulationModule]),
     narrationEngine,
+    {
+      engine: (state) => [
+        {
+          id: "temperature.value",
+          label: "Temperature",
+          value: state.temperature.value,
+          unit: "degrees",
+        },
+      ],
+    } satisfies SystemObservableProjections<GameState>,
   );
 }
 

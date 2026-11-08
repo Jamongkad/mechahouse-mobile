@@ -1,8 +1,14 @@
 import type {
-  NarrationContext,
   NarrationEngine,
   NarrationPassage,
 } from "../narration/narration";
+import {
+  diffSystemObservations,
+  projectAllSystemObservations,
+  projectSystemObservation,
+  selectObservableFacts,
+  type SystemObservableProjections,
+} from "../narration/observable-facts";
 import type {
   SimulationEngine,
   SimulationResult,
@@ -22,6 +28,7 @@ export type GameCoordinatorFeedEntry<State extends object> = Readonly<{
 
 export type GameCoordinatorSnapshot<State extends object> = Readonly<{
   state: State;
+  gameTime: number;
   feed: readonly GameCoordinatorFeedEntry<State>[];
 }>;
 
@@ -35,9 +42,10 @@ export class GameCoordinator<
   constructor(
     state: State,
     private readonly simulationEngine: SimulationEngine<State, Command>,
-    private readonly narrationEngine: NarrationEngine<State>,
+    private readonly narrationEngine: NarrationEngine,
+    private readonly observableProjections: SystemObservableProjections<State> = {},
   ) {
-    this.snapshot = { state, feed: [] };
+    this.snapshot = { state, gameTime: 0, feed: [] };
   }
 
   getSnapshot = (): GameCoordinatorSnapshot<State> => this.snapshot;
@@ -49,29 +57,62 @@ export class GameCoordinator<
     };
   };
 
+  inspect(systemId: string, detailGroup?: string): NarrationPassage[] {
+    const observation = projectSystemObservation(
+      this.snapshot.state,
+      systemId,
+      this.observableProjections,
+    );
+
+    return this.narrationEngine.inspect({
+      ...observation,
+      facts: selectObservableFacts(observation.facts, detailGroup),
+    });
+  }
+
   dispatch(command: Command): GameCoordinatorResult<State> {
+    const previousObservations = projectAllSystemObservations(
+      this.snapshot.state,
+      this.observableProjections,
+    );
     const simulationResult = this.simulationEngine.simulate(
       this.snapshot.state,
       command,
     );
-
-    const narration = this.narrationEngine.narrate(
-      simulationResult as NarrationContext<State>,
+    const nextObservations = projectAllSystemObservations(
+      simulationResult.state,
+      this.observableProjections,
     );
+    const stateChanged = simulationResult.changes.length > 0;
+    const narration = stateChanged
+      ? this.narrationEngine.narrateAction({
+          facts: nextObservations.flatMap(({ facts }) => facts),
+          changes: diffSystemObservations(
+            previousObservations,
+            nextObservations,
+          ),
+        })
+      : [];
 
     const result: GameCoordinatorResult<State> = {
       ...simulationResult,
       narration,
     };
 
-    this.snapshot = {
-      state: result.state,
-      feed: [
-        ...this.snapshot.feed,
-        { id: this.snapshot.feed.length, result },
-      ],
-    };
-    for (const listener of this.listeners) listener();
+    if (stateChanged) {
+      this.snapshot = {
+        state: result.state,
+        gameTime: this.snapshot.gameTime + 1,
+        feed:
+          narration.length > 0
+            ? [
+                ...this.snapshot.feed,
+                { id: this.snapshot.feed.length, result },
+              ]
+            : this.snapshot.feed,
+      };
+      for (const listener of this.listeners) listener();
+    }
 
     return result;
   }
