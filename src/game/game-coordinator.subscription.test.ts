@@ -3,6 +3,7 @@ import {
   SimulationEngine,
   type SimulationModule,
 } from "../simulation/simulation";
+import type { SystemObservableProjections } from "../narration/observable-facts";
 import { GameCoordinator } from "./game-coordinator";
 
 type GameState = { temperature: { value: number } };
@@ -31,14 +32,16 @@ function makeCoordinator() {
       },
     ],
   };
-  const narrationModule: NarrationModule<GameState> = {
+  const narrationModule: NarrationModule = {
     id: "engine",
-    rules: [
+    actionRules: [
       {
         id: "temperature.updated",
         evaluate(context) {
           if (failNarration) throw new Error("Narration failed");
-          return context.outcomes.some(({ id }) => id === "temperature.updated")
+          return context.changes.some(
+            ({ factId }) => factId === "temperature.value",
+          )
             ? { id: "temperature.updated" }
             : undefined;
         },
@@ -51,6 +54,11 @@ function makeCoordinator() {
     new NarrationEngine(narrationModule, [
       { id: "temperature.updated", lines: ["Updated"] },
     ]),
+    {
+      engine: (state) => [
+        { id: "temperature.value", label: "Temperature", value: state.temperature.value },
+      ],
+    } satisfies SystemObservableProjections<GameState>,
   );
 
   return {
@@ -73,6 +81,7 @@ describe("GameCoordinator subscriptions", () => {
 
     expect(snapshot).toEqual({
       state: { temperature: { value: 100 } },
+      gameTime: 0,
       feed: [],
     });
     expect(coordinator.getSnapshot()).toBe(snapshot);
@@ -88,10 +97,12 @@ describe("GameCoordinator subscriptions", () => {
     const secondResult = coordinator.dispatch(setTemperature(130));
 
     expect(firstSnapshot.feed).toEqual([{ id: 0, result: firstResult }]);
+    expect(firstSnapshot.gameTime).toBe(1);
     expect(coordinator.getSnapshot().feed).toEqual([
       { id: 0, result: firstResult },
       { id: 1, result: secondResult },
     ]);
+    expect(coordinator.getSnapshot().gameTime).toBe(2);
     expect(listener).toHaveBeenCalledTimes(2);
 
     unsubscribe();
@@ -112,8 +123,27 @@ describe("GameCoordinator subscriptions", () => {
     expect(coordinator.getSnapshot()).toBe(before);
     expect(coordinator.getSnapshot()).toEqual({
       state: { temperature: { value: 100 } },
+      gameTime: 0,
       feed: [],
     });
     expect(listener).not.toHaveBeenCalled();
+  });
+
+  test("advances game time only when an action changes state", () => {
+    const { coordinator } = makeCoordinator();
+    const initialSnapshot = coordinator.getSnapshot();
+
+    coordinator.dispatch(setTemperature(100));
+    expect(coordinator.getSnapshot().gameTime).toBe(0);
+    expect(coordinator.getSnapshot()).toBe(initialSnapshot);
+    expect(coordinator.getSnapshot().feed).toEqual([]);
+
+    coordinator.dispatch(setTemperature(120));
+    expect(coordinator.getSnapshot().gameTime).toBe(1);
+    const changedSnapshot = coordinator.getSnapshot();
+
+    coordinator.dispatch(setTemperature(120));
+    expect(coordinator.getSnapshot().gameTime).toBe(1);
+    expect(coordinator.getSnapshot()).toBe(changedSnapshot);
   });
 });
